@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent 用量",
+    "description": "在左侧栏新增一个面板，显示本地各 Agent 客户端（Claude 桌面端、千问办公、WorkBuddy、MiniMax Code、DeepSeek Harness）当天的会话数与 token 消耗。点击左侧栏的面板图标即可打开。仅读取本地会话日志，不修改任何数据，也不向本机以外发送任何内容。"
+  }
+}

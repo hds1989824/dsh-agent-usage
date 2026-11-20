@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent usage",
+    "description": "Adds a left-sidebar panel that shows today's session count and token consumption for your local agent clients (Claude desktop, Qwen Work, WorkBuddy, MiniMax Code, and DeepSeek Harness). Open it from the sidebar panel icon. It reads local session logs only, never modifies them, and sends nothing off the machine."
+  }
+}
