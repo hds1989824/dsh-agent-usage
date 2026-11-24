@@ -36,6 +36,40 @@ function addUsage(dst, src) {
   dst.total += src.total || 0;
 }
 
+/**
+ * Aggregate one usage record into a per-model bucket. `<synthetic>` is not a
+ * real model and is dropped; an absent label is kept as `(unknown)` so its
+ * tokens still appear in the model breakdown.
+ */
+function addModelUsage(byModel, model, usage) {
+  let key;
+  if (model === undefined || model === null) {
+    key = '(unknown)';
+  } else {
+    const s = String(model).trim();
+    if (!s) key = '(unknown)';
+    else if (s === '<synthetic>') return;
+    else key = s;
+  }
+  const dst = byModel[key] || (byModel[key] = emptyUsage());
+  addUsage(dst, usage);
+}
+
+/** Merge one scan's per-model buckets into an aggregate map. */
+function mergeModels(dst, src) {
+  if (!src) return;
+  for (const [model, usage] of Object.entries(src)) {
+    addUsage(dst[model] || (dst[model] = emptyUsage()), usage);
+  }
+}
+
+/** The model label carried by one log line, per platform. */
+function modelOf(kind, o) {
+  if (kind === 'claude') return o?.message?.model;
+  if (kind === 'workbuddy') return o?.providerData?.model;
+  return null;
+}
+
 /** Recursively collect every `.jsonl` file below `dir`. */
 async function walkJsonl(dir, out = []) {
   return walkSuffix(dir, '.jsonl', out);
@@ -96,6 +130,25 @@ async function claudeProjectFiles(root) {
 }
 
 /**
+ * Friendly labels for Qwen Work's model tiers. The local session data only
+ * stores the tier key (`flash`, `pro`, ...); the display names come from
+ * Qwen's own chat-modes catalog.
+ */
+const QWEN_MODE_LABELS = {
+  flash: '千问·标准 (flash)',
+  pro: '千问·高级 (pro)',
+  'qwen4-max': '千问·Qwen4-Max',
+  'deepseek-v4-pro': '千问·Deepseek-V4-Pro',
+  'glm-5.3': '千问·GLM-5.3',
+};
+
+function qwenModelLabel(id) {
+  if (id === undefined || id === null) return null;
+  const s = String(id).trim();
+  return s ? QWEN_MODE_LABELS[s] || s : null;
+}
+
+/**
  * Current Qwen Work releases keep their sessions in a SQLite database under
  * `~/.qwenworkcn/.harness` tree, instead of the older
  * `~/.qwenworkcn/projects` JSONL layout. Find the database, preferring the
@@ -134,7 +187,7 @@ async function findQwenDb(home) {
  * contributes the messages of the requested day.
  */
 async function scanQwenDb(dbPath, start, end) {
-  const empty = { details: [], usage: emptyUsage() };
+  const empty = { details: [], usage: emptyUsage(), models: {} };
   let sqlite;
   try {
     sqlite = await import('node:sqlite');
@@ -159,9 +212,12 @@ async function scanQwenDb(dbPath, start, end) {
       group by s.id
     `).all(startMs, endMs);
     const messageRows = db.prepare(`
-      select session_id, data from message where time_created >= ? and time_created < ?
+      select m.session_id as session_id, m.data as data, s.model as session_model
+      from message m left join session s on s.id = m.session_id
+      where m.time_created >= ? and m.time_created < ?
     `).all(startMs, endMs);
 
+    const models = {};
     const bySession = {};
     for (const row of sessionRows) {
       bySession[row.id] = {
@@ -187,17 +243,23 @@ async function scanQwenDb(dbPath, start, end) {
       const output = (t.output || 0) + (t.reasoning || 0);
       const cacheRead = (t.cache && t.cache.read) || 0;
       const cacheCreation = (t.cache && t.cache.write) || 0;
-      rec.usage.input += input;
-      rec.usage.output += output;
-      rec.usage.cacheRead += cacheRead;
-      rec.usage.cacheCreation += cacheCreation;
-      rec.usage.total += input + output + cacheRead + cacheCreation;
+      const u = { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation };
+      addUsage(rec.usage, u);
+      let modelId = o.modelID;
+      if (!modelId && row.session_model) {
+        try {
+          modelId = JSON.parse(row.session_model).id;
+        } catch {
+          // keep the message-level model id
+        }
+      }
+      addModelUsage(models, qwenModelLabel(modelId), u);
     }
     const details = Object.values(bySession);
     details.sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
     const usage = emptyUsage();
     for (const d of details) addUsage(usage, d.usage);
-    return { details, usage };
+    return { details, usage, models };
   } catch {
     return empty;
   } finally {
@@ -262,7 +324,7 @@ async function findMiniMaxDb(home) {
  * per session from `local_runtime_token_usage`.
  */
 async function scanMiniMaxDb(dbPath, start, end) {
-  const empty = { details: [], usage: emptyUsage() };
+  const empty = { details: [], usage: emptyUsage(), models: {} };
   let sqlite;
   try {
     sqlite = await import('node:sqlite');
@@ -306,7 +368,26 @@ async function scanMiniMaxDb(dbPath, start, end) {
     details.sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
     const usage = emptyUsage();
     for (const d of details) addUsage(usage, d.usage);
-    return { details, usage };
+
+    const modelRows = db.prepare(`
+      select model,
+             sum(input_tokens) as input,
+             sum(output_tokens + reasoning_tokens) as output,
+             sum(cache_read_tokens) as cache_read,
+             sum(cache_write_tokens) as cache_write
+      from local_runtime_token_usage
+      where ts >= ? and ts < ?
+      group by model
+    `).all(startMs, endMs);
+    const models = {};
+    for (const row of modelRows) {
+      const input = row.input || 0;
+      const output = row.output || 0;
+      const cacheRead = row.cache_read || 0;
+      const cacheCreation = row.cache_write || 0;
+      addModelUsage(models, row.model, { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation });
+    }
+    return { details, usage, models };
   } catch {
     return empty;
   } finally {
@@ -326,6 +407,7 @@ async function scanMiniMaxJsonl(home, start, end) {
   const root = join(home, '.minimax', 'v2', 'sessions');
   const files = await walkNamed(root, 'messages.jsonl');
   const bySession = {};
+  const models = {};
   for (const fp of files) {
     let mtime;
     try {
@@ -378,11 +460,9 @@ async function scanMiniMaxJsonl(home, start, end) {
       const output = (u.output || 0) + (u.reasoning || 0);
       const cacheRead = u.cacheRead || 0;
       const cacheCreation = u.cacheWrite || 0;
-      usage.input += input;
-      usage.output += output;
-      usage.cacheRead += cacheRead;
-      usage.cacheCreation += cacheCreation;
-      usage.total += input + output + cacheRead + cacheCreation;
+      const record = { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation };
+      addUsage(usage, record);
+      addModelUsage(models, m.model, record);
     }
     if (!today) continue;
     const rec = bySession[sid] || (bySession[sid] = { session: sid, title, first, last, usage: emptyUsage() });
@@ -394,7 +474,7 @@ async function scanMiniMaxJsonl(home, start, end) {
   details.sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
   const usage = emptyUsage();
   for (const d of details) addUsage(usage, d.usage);
-  return { details, usage };
+  return { details, usage, models };
 }
 
 /** Aggregate a set of JSONL session files for one day. */
@@ -485,11 +565,13 @@ async function scanDshFile(fp, start, end) {
     return null;
   }
   const usage = emptyUsage();
+  const models = {};
   let first = null;
   let last = null;
   let inRange = false;
   let sid = null;
   let title = '';
+  let model = null;
   for (const line of text.toString('utf8').split('\n')) {
     if (!line) continue;
     let o;
@@ -500,6 +582,8 @@ async function scanDshFile(fp, start, end) {
     }
     if (o.type === 'session' && o.id) sid = o.id;
     if (o.type === 'session/title' && o.data && o.data.title) title = o.data.title;
+    if (o.type === 'request/header') model = o.data?.header?.config?.model || model;
+    if (o.type === 'request/context') model = o.data?.model || model;
     const t = o.time;
     if (t) {
       const s = t / 1000;
@@ -513,14 +597,13 @@ async function scanDshFile(fp, start, end) {
     const input = u.inputTokens || 0;
     const output = (u.outputTokens || 0) + (u.reasoningTokens || 0);
     const cacheRead = u.cacheReadTokens || 0;
-    usage.input += input;
-    usage.output += output;
-    usage.cacheRead += cacheRead;
-    usage.total += input + output + cacheRead;
+    const record = { input, output, cacheRead, cacheCreation: 0, total: input + output + cacheRead };
+    addUsage(usage, record);
+    addModelUsage(models, model, record);
   }
   if (!inRange) return null;
   if (!sid) sid = basename(dirname(fp));
-  return { session: sid, title, first, last, usage };
+  return { session: sid, title, first, last, usage, models };
 }
 
 /** Run the scan strategy that fits one platform. */
@@ -554,8 +637,12 @@ async function scanPlatform(def, home, start, end) {
     const details = scanned.filter(Boolean);
     details.sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
     const usage = emptyUsage();
-    for (const d of details) addUsage(usage, d.usage);
-    return { details, usage };
+    const models = {};
+    for (const d of details) {
+      addUsage(usage, d.usage);
+      mergeModels(models, d.models);
+    }
+    return { details, usage, models };
   }
   let files = [];
   try {
@@ -581,8 +668,12 @@ async function scanFiles(files, start, end, kind) {
   const details = scanned.filter(Boolean);
   details.sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
   const usage = emptyUsage();
-  for (const d of details) addUsage(usage, d.usage);
-  return { details, usage };
+  const models = {};
+  for (const d of details) {
+    addUsage(usage, d.usage);
+    mergeModels(models, d.models);
+  }
+  return { details, usage, models };
 }
 
 function toEpoch(value) {
@@ -595,20 +686,31 @@ function toEpoch(value) {
 }
 
 /**
- * Read one usage record from a log line. Claude assistant messages carry
- * `message.usage`; WorkBuddy function_call events carry `message.usage` too.
- * Qwen Work does not report usage, so it yields null.
+ * Read and normalize one usage record from a log line. Claude assistant
+ * messages carry `message.usage`; WorkBuddy function_call events carry
+ * `message.usage` too. WorkBuddy's `input_tokens` already includes its cache
+ * reads, so its cache columns are zeroed and the total is input + output;
+ * Claude reports the non-cached input, so the cache fields add on top.
  */
-function readUsage(o) {
+function readUsage(o, kind) {
   const u = o?.message?.usage ?? o?.usage ?? o?.payload?.usage;
   if (!u || typeof u !== 'object') return null;
   const num = (k) => (typeof u[k] === 'number' && Number.isFinite(u[k]) ? u[k] : 0);
-  return {
+  const usage = {
     input: num('input_tokens'),
     output: num('output_tokens'),
     cacheRead: num('cache_read_input_tokens'),
     cacheCreation: num('cache_creation_input_tokens'),
+    total: 0,
   };
+  if (kind === 'workbuddy') {
+    usage.cacheRead = 0;
+    usage.cacheCreation = 0;
+    usage.total = usage.input + usage.output;
+  } else {
+    usage.total = usage.input + usage.output + usage.cacheRead + usage.cacheCreation;
+  }
+  return usage;
 }
 
 function fmtDate(d) {
@@ -692,25 +794,6 @@ function platformDefs(home) {
 }
 
 /**
- * Token totals differ by platform. Claude reports `input_tokens` as the
- * non-cached portion, so the cache fields are added on top; WorkBuddy's
- * `input_tokens` already includes its cache reads, so the total is just
- * input + output and its cache columns are zeroed to avoid double counting.
- * Qwen Work reports no usage at all.
- */
-function normalizeUsage(kind, usage) {
-  if (kind === 'workbuddy') {
-    usage.cacheRead = 0;
-    usage.cacheCreation = 0;
-    usage.total = usage.input + usage.output;
-  } else if (kind === 'claude') {
-    usage.total = usage.input + usage.cacheRead + usage.cacheCreation + usage.output;
-  } else {
-    usage.total = 0;
-  }
-}
-
-/**
  * Scan one session file. Returns null when the file has no event in the day
  * window. Claude logs one response several times (one line per content block)
  * with the same `message.id` and the same usage, so usage is deduplicated by
@@ -726,6 +809,7 @@ async function scanFile(fp, start, end, kind) {
   const session = basename(fp, '.jsonl');
   const seen = new Set();
   const usage = emptyUsage();
+  const models = {};
   let first = null;
   let last = null;
   let today = false;
@@ -744,7 +828,7 @@ async function scanFile(fp, start, end, kind) {
       if (ts >= start && ts < end) today = true;
     }
     if (ts === null || ts < start || ts >= end) continue;
-    const u = readUsage(o);
+    const u = readUsage(o, kind);
     if (!u) continue;
     if (kind === 'claude') {
       const id = o?.message?.id;
@@ -753,10 +837,10 @@ async function scanFile(fp, start, end, kind) {
       seen.add(key);
     }
     addUsage(usage, u);
+    addModelUsage(models, modelOf(kind, o), u);
   }
   if (!today) return null;
-  normalizeUsage(kind, usage);
-  return { session, first, last, usage };
+  return { session, first, last, usage, models };
 }
 
 /**
@@ -770,13 +854,19 @@ export async function collectAgentUsage(options = {}) {
   const home = options.home || homedir();
   const platforms = [];
   const totals = { sessions: 0, usage: emptyUsage() };
+  const byModel = {};
 
   for (const def of platformDefs(home)) {
-    const { details, usage } = await scanPlatform(def, home, start, end);
+    const { details, usage, models } = await scanPlatform(def, home, start, end);
     platforms.push({ id: def.id, label: def.label, sessions: details.length, usage, details });
     totals.sessions += details.length;
     addUsage(totals.usage, usage);
+    mergeModels(byModel, models);
   }
+
+  const modelList = Object.entries(byModel)
+    .map(([model, usage]) => ({ model, ...usage }))
+    .sort((a, b) => b.total - a.total);
 
   return {
     date: label,
@@ -785,6 +875,7 @@ export async function collectAgentUsage(options = {}) {
     dayStart: new Date(start * 1000).toISOString(),
     dayEnd: new Date(end * 1000).toISOString(),
     platforms,
+    models: modelList,
     totals,
   };
 }

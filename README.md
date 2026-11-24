@@ -9,7 +9,8 @@ over the current day, week, or month.
 - A time-range switch: **Today**, **This week** (Monday-based), **This month**.
 - A responsive row of summary cards: sessions, input tokens, output tokens, cache
   reads, cache creation, and total tokens for the selected window.
-- A donut chart of the token share by agent, with a percentage legend.
+- Two donut charts side by side: token share **by agent** and **by model**, each
+  with a percentage legend.
 - A per-client table: Claude desktop, Qwen Work, WorkBuddy, MiniMax Code, and
   DeepSeek Harness.
 - A per-session detail table (toggleable) with the last-activity time and token
@@ -34,13 +35,21 @@ the central column.
   per-write zstd frames; the scanner splits frames, then reads `data.usage` from
   `assistant/message` events)
 
-Only files whose modification time falls inside the selected window are read, and
-only events whose own timestamp falls inside that window are counted. Claude logs
+Once files whose modification time falls inside the selected window are read, only
+events whose own timestamp falls inside that window are counted. Claude logs
 one response several times (one line per content block) with the same
 `message.id`; usage is counted once per response. Qwen Work and MiniMax Code
 token counts come from their local session databases. WorkBuddy input tokens
 already include its cache reads, so its cache columns are zero and its total is
 input + output.
+
+The per-model breakdown uses each platform's own model label: Claude's
+`message.model`, WorkBuddy's `providerData.model`, Qwen Work's `modelID`
+(falling back to the session's configured id), MiniMax's `model` column, and for
+DeepSeek Harness the model of the most recent `request/header`/`request/context`
+before an assistant message. Qwen Work's tier keys get friendly labels from its
+own catalog (`flash` → `千问·标准 (flash)`, `pro` → `千问·高级 (pro)`). A missing
+label is grouped as `(unknown)`; `<synthetic>` is ignored.
 
 The Host exposes the data at `GET /plugins/agent-usage/today` (optional
 `?range=today|week|month`, `?date=YYYY-MM-DD`, and `&force=1`). The route is

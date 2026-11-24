@@ -42,6 +42,9 @@ window.__ModuleLoader__.load({
       'panel.empty': 'No agent sessions recorded in this range.',
       'panel.composition': 'Usage by agent',
       'panel.donutLabel': 'Token usage share by agent',
+      'panel.byAgent': 'By agent',
+      'panel.byModel': 'By model',
+      'panel.donutModelLabel': 'Token usage share by model',
       'panel.note': 'Reads local session logs only. Qwen Work token counts come from its local session database. WorkBuddy input tokens already include its cache reads, so its cache columns are zero.',
       'panel.updated': 'Updated',
       'panel.showDetails': 'Show session detail',
@@ -71,6 +74,9 @@ window.__ModuleLoader__.load({
       'panel.empty': '该时间范围内没有记录到 Agent 会话。',
       'panel.composition': '各 Agent 用量构成',
       'panel.donutLabel': '各 Agent token 用量占比',
+      'panel.byAgent': '按 Agent',
+      'panel.byModel': '按模型',
+      'panel.donutModelLabel': '各模型 token 用量占比',
       'panel.note': '仅读取本地会话日志。千问办公的 token 数来自其本地会话数据库；WorkBuddy 的输入 tokens 已包含缓存读取，因此其缓存列显示为 0。',
       'panel.updated': '更新于',
       'panel.showDetails': '显示会话明细',
@@ -193,6 +199,19 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: 20,
         flexWrap: 'wrap',
+      },
+      donutRow: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 24,
+        alignItems: 'flex-start',
+      },
+      donutCol: { flex: '1 1 300px', minWidth: 260 },
+      donutTitle: {
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: 'var(--dsw-alias-label-secondary)',
+        marginBottom: 6,
       },
       legend: { listStyle: 'none', margin: 0, padding: 0, fontSize: 12.5, minWidth: 190 },
       legendItem: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' },
@@ -375,12 +394,23 @@ window.__ModuleLoader__.load({
                 h(Card, { label: t('panel.cacheCreation'), value: tu.cacheCreation }),
                 h(Card, { label: t('panel.total'), value: tu.total })),
               h('h3', { style: styles.sectionTitle }, t('panel.composition')),
-              h(UsageDonut, {
-                items: (data.platforms || [])
-                  .map((p) => ({ id: p.id, label: p.label, value: (p.usage || {}).total || 0 }))
-                  .filter((p) => p.value > 0),
-                label: t('panel.donutLabel'),
-              }),
+              h('div', { style: styles.donutRow },
+                h('div', { style: styles.donutCol },
+                  h('div', { style: styles.donutTitle }, t('panel.byAgent')),
+                  h(UsageDonut, {
+                    items: (data.platforms || [])
+                      .map((p) => ({ id: p.id, label: p.label, value: (p.usage || {}).total || 0 }))
+                      .filter((p) => p.value > 0),
+                    label: t('panel.donutLabel'),
+                  })),
+                h('div', { style: styles.donutCol },
+                  h('div', { style: styles.donutTitle }, t('panel.byModel')),
+                  h(UsageDonut, {
+                    items: (data.models || [])
+                      .map((m) => ({ id: m.model, label: m.model, value: m.total || 0 }))
+                      .filter((m) => m.value > 0),
+                    label: t('panel.donutModelLabel'),
+                  }))),
               h('h3', { style: styles.sectionTitle }, t('panel.platform')),
               h('div', { style: styles.tableScroll },
                 h('table', { style: styles.table },
