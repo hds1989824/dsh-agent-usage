@@ -34,7 +34,7 @@ window.__ModuleLoader__.load({
       'panel.input': 'Input tokens',
       'panel.output': 'Output tokens',
       'panel.cacheRead': 'Cache read',
-      'panel.cacheCreation': 'Cache creation',
+      'panel.cacheHitRate': 'Cache hit rate',
       'panel.total': 'Total tokens',
       'panel.platform': 'Agent client',
       'panel.session': 'Session',
@@ -66,7 +66,7 @@ window.__ModuleLoader__.load({
       'panel.input': '输入 tokens',
       'panel.output': '输出 tokens',
       'panel.cacheRead': '缓存读取',
-      'panel.cacheCreation': '缓存创建',
+      'panel.cacheHitRate': '缓存命中率',
       'panel.total': '总 tokens',
       'panel.platform': 'Agent 客户端',
       'panel.session': '会话',
@@ -260,10 +260,24 @@ window.__ModuleLoader__.load({
       return msg;
     }
 
-    function Card({ label, value }) {
+    function Card({ label, value, title }) {
+      const text = typeof value === 'string' ? value : fmtTokens(value);
       return h('div', { style: styles.card },
         h('div', { style: styles.cardKey }, label),
-        h('div', { style: styles.cardValue, title: String(value) }, fmtTokens(value)));
+        h('div', { style: styles.cardValue, title: title != null ? title : String(value) }, text));
+    }
+
+    /** Cache hit rate = cached reads / total context tokens. */
+    function fmtHitRate(u) {
+      const ctx = Number(u && u.contextTokens) || 0;
+      const cr = Number(u && u.cacheReadRaw) || 0;
+      return ctx ? `${((cr / ctx) * 100).toFixed(1)}%` : '—';
+    }
+
+    function hitRateTitle(u) {
+      const ctx = Number(u && u.contextTokens) || 0;
+      const cr = Number(u && u.cacheReadRaw) || 0;
+      return ctx ? `${cr} / ${ctx}` : undefined;
     }
 
     function TokenCell({ value }) {
@@ -391,7 +405,7 @@ window.__ModuleLoader__.load({
                 h(Card, { label: t('panel.input'), value: tu.input }),
                 h(Card, { label: t('panel.output'), value: tu.output }),
                 h(Card, { label: t('panel.cacheRead'), value: tu.cacheRead }),
-                h(Card, { label: t('panel.cacheCreation'), value: tu.cacheCreation }),
+                h(Card, { label: t('panel.cacheHitRate'), value: fmtHitRate(tu), title: hitRateTitle(tu) }),
                 h(Card, { label: t('panel.total'), value: tu.total })),
               h('h3', { style: styles.sectionTitle }, t('panel.composition')),
               h('div', { style: styles.donutRow },
@@ -420,7 +434,7 @@ window.__ModuleLoader__.load({
                     h('th', { style: { ...styles.th, ...styles.num }, scope: 'col' }, t('panel.input')),
                     h('th', { style: { ...styles.th, ...styles.num }, scope: 'col' }, t('panel.output')),
                     h('th', { style: { ...styles.th, ...styles.num }, scope: 'col' }, t('panel.cacheRead')),
-                    h('th', { style: { ...styles.th, ...styles.num }, scope: 'col' }, t('panel.cacheCreation')),
+                    h('th', { style: { ...styles.th, ...styles.num }, scope: 'col' }, t('panel.cacheHitRate')),
                     h('th', { style: { ...styles.th, ...styles.num }, scope: 'col' }, t('panel.total')))),
                   h('tbody', null, (data.platforms || []).map((p) => {
                     const u = p.usage || {};
@@ -430,7 +444,7 @@ window.__ModuleLoader__.load({
                       h(TokenCell, { value: u.input }),
                       h(TokenCell, { value: u.output }),
                       h(TokenCell, { value: u.cacheRead }),
-                      h(TokenCell, { value: u.cacheCreation }),
+                      h('td', { style: { ...styles.td, ...styles.num }, title: hitRateTitle(u) }, fmtHitRate(u)),
                       h(TokenCell, { value: u.total }));
                   })))),
               rows.length > 0

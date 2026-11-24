@@ -10,7 +10,7 @@ over the current day, week, or month.
 
 - A time-range switch: **Today**, **This week** (Monday-based), **This month**.
 - A responsive row of summary cards: sessions, input tokens, output tokens, cache
-  reads, cache creation, and total tokens for the selected window.
+  reads, cache hit rate, and total tokens for the selected window.
 - Two donut charts side by side: token share **by agent** and **by model**, each
   with a percentage legend.
 - A per-client table: Claude desktop, Qwen Work, WorkBuddy, MiniMax Code, and
@@ -52,6 +52,12 @@ DeepSeek Harness the model of the most recent `request/header`/`request/context`
 before an assistant message. Qwen Work's tier keys get friendly labels from its
 own catalog (`flash` → `千问·标准 (flash)`, `pro` → `千问·高级 (pro)`). A missing
 label is grouped as `(unknown)`; `<synthetic>` is ignored.
+
+Cache creation is reported as zero by every source, so the panel shows a **cache
+hit rate** instead: cached reads divided by total context tokens
+(`cache_read / (input + cache_read)`). WorkBuddy counts differently — its
+`input_tokens` already includes the cache reads — so its context is just its
+reported input. Hover the card for the exact numerator/denominator.
 
 The Host exposes the data at `GET /plugins/agent-usage/today` (optional
 `?range=today|week|month`, `?date=YYYY-MM-DD`, and `&force=1`). The route is

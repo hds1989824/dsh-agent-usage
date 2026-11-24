@@ -25,7 +25,17 @@ const zstdDecompressAsync = promisify(zstdDecompress);
 const SKIP_DIRS = new Set(['node_modules', '.git', 'Cache', 'GPUCache', 'Code Cache']);
 
 function emptyUsage() {
-  return { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 };
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    total: 0,
+    // Internal: the raw cache-read tokens and the total context tokens, used to
+    // compute the cache hit rate. Not shown as their own columns.
+    cacheReadRaw: 0,
+    contextTokens: 0,
+  };
 }
 
 function addUsage(dst, src) {
@@ -34,6 +44,18 @@ function addUsage(dst, src) {
   dst.cacheRead += src.cacheRead || 0;
   dst.cacheCreation += src.cacheCreation || 0;
   dst.total += src.total || 0;
+  dst.cacheReadRaw += src.cacheReadRaw || 0;
+  dst.contextTokens += src.contextTokens || 0;
+}
+
+/**
+ * Total context tokens behind one usage record. Platforms disagree on whether
+ * `input_tokens` already contains the cached reads: Claude, Qwen Work, MiniMax
+ * Code and DSH report the non-cached portion, while WorkBuddy's input already
+ * includes its cache reads.
+ */
+function contextTokensOf(kind, input, cacheReadRaw) {
+  return kind === 'workbuddy' ? input : input + cacheReadRaw;
 }
 
 /**
@@ -243,7 +265,15 @@ async function scanQwenDb(dbPath, start, end) {
       const output = (t.output || 0) + (t.reasoning || 0);
       const cacheRead = (t.cache && t.cache.read) || 0;
       const cacheCreation = (t.cache && t.cache.write) || 0;
-      const u = { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation };
+      const u = {
+        input,
+        output,
+        cacheRead,
+        cacheCreation,
+        total: input + output + cacheRead + cacheCreation,
+        cacheReadRaw: cacheRead,
+        contextTokens: input + cacheRead,
+      };
       addUsage(rec.usage, u);
       let modelId = o.modelID;
       if (!modelId && row.session_model) {
@@ -362,7 +392,15 @@ async function scanMiniMaxDb(dbPath, start, end) {
         title: row.title || '',
         first: row.first / 1000,
         last: row.last / 1000,
-        usage: { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation },
+        usage: {
+          input,
+          output,
+          cacheRead,
+          cacheCreation,
+          total: input + output + cacheRead + cacheCreation,
+          cacheReadRaw: cacheRead,
+          contextTokens: input + cacheRead,
+        },
       };
     });
     details.sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
@@ -385,7 +423,15 @@ async function scanMiniMaxDb(dbPath, start, end) {
       const output = row.output || 0;
       const cacheRead = row.cache_read || 0;
       const cacheCreation = row.cache_write || 0;
-      addModelUsage(models, row.model, { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation });
+      addModelUsage(models, row.model, {
+        input,
+        output,
+        cacheRead,
+        cacheCreation,
+        total: input + output + cacheRead + cacheCreation,
+        cacheReadRaw: cacheRead,
+        contextTokens: input + cacheRead,
+      });
     }
     return { details, usage, models };
   } catch {
@@ -460,7 +506,15 @@ async function scanMiniMaxJsonl(home, start, end) {
       const output = (u.output || 0) + (u.reasoning || 0);
       const cacheRead = u.cacheRead || 0;
       const cacheCreation = u.cacheWrite || 0;
-      const record = { input, output, cacheRead, cacheCreation, total: input + output + cacheRead + cacheCreation };
+      const record = {
+        input,
+        output,
+        cacheRead,
+        cacheCreation,
+        total: input + output + cacheRead + cacheCreation,
+        cacheReadRaw: cacheRead,
+        contextTokens: input + cacheRead,
+      };
       addUsage(usage, record);
       addModelUsage(models, m.model, record);
     }
@@ -597,7 +651,15 @@ async function scanDshFile(fp, start, end) {
     const input = u.inputTokens || 0;
     const output = (u.outputTokens || 0) + (u.reasoningTokens || 0);
     const cacheRead = u.cacheReadTokens || 0;
-    const record = { input, output, cacheRead, cacheCreation: 0, total: input + output + cacheRead };
+    const record = {
+      input,
+      output,
+      cacheRead,
+      cacheCreation: 0,
+      total: input + output + cacheRead,
+      cacheReadRaw: cacheRead,
+      contextTokens: input + cacheRead,
+    };
     addUsage(usage, record);
     addModelUsage(models, model, record);
   }
@@ -696,19 +758,23 @@ function readUsage(o, kind) {
   const u = o?.message?.usage ?? o?.usage ?? o?.payload?.usage;
   if (!u || typeof u !== 'object') return null;
   const num = (k) => (typeof u[k] === 'number' && Number.isFinite(u[k]) ? u[k] : 0);
+  const cacheReadRaw = num('cache_read_input_tokens');
+  const input = num('input_tokens');
   const usage = {
-    input: num('input_tokens'),
+    input,
     output: num('output_tokens'),
-    cacheRead: num('cache_read_input_tokens'),
+    cacheRead: cacheReadRaw,
     cacheCreation: num('cache_creation_input_tokens'),
     total: 0,
+    cacheReadRaw,
+    contextTokens: contextTokensOf(kind, input, cacheReadRaw),
   };
   if (kind === 'workbuddy') {
     usage.cacheRead = 0;
     usage.cacheCreation = 0;
     usage.total = usage.input + usage.output;
   } else {
-    usage.total = usage.input + usage.output + usage.cacheRead + usage.cacheCreation;
+    usage.total = usage.input + usage.output + cacheReadRaw + usage.cacheCreation;
   }
   return usage;
 }
