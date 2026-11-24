@@ -4,6 +4,8 @@ A DeepSeek Harness bundle that adds a **left-sidebar panel** showing session
 count and token consumption for the agent clients installed on this machine,
 over the current day, week, or month.
 
+![Agent usage panel: session counts and token consumption by client, with by-agent and by-model donut charts](docs/screenshot.png)
+
 ## What it shows
 
 - A time-range switch: **Today**, **This week** (Monday-based), **This month**.
