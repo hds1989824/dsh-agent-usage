@@ -1,7 +1,6 @@
 {
-  "name": "@local/dsh-agent-usage",
+  "name": "dsh-agent-usage",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "description": "Left-sidebar panel showing today's session count and token consumption for local agent clients (Claude desktop, Qwen Work, WorkBuddy, MiniMax Code, and DeepSeek Harness).",
   "exports": {
@@ -18,8 +17,16 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "screenshots.json",
     "docs"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hds1989824/dsh-agent-usage.git"
+  },
+  "homepage": "https://github.com/hds1989824/dsh-agent-usage#readme",
+  "bugs": { "url": "https://github.com/hds1989824/dsh-agent-usage/issues" },
+  "engines": { "node": ">=22.15" },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

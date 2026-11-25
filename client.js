@@ -8,7 +8,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-agent-usage',
+  id: 'dsh-agent-usage',
   factory(require) {
     const React = require('react');
     const h = React.createElement;

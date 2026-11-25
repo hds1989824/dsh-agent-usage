@@ -1,4 +1,4 @@
 - insert:
     - id: agent-usage
-      name: '@local/dsh-agent-usage'
+      name: 'dsh-agent-usage'
       config: {}
