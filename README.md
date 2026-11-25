@@ -4,7 +4,7 @@ A DeepSeek Harness bundle that adds a **left-sidebar panel** showing session
 count and token consumption for the agent clients installed on this machine,
 over the current day, week, or month.
 
-![Agent usage panel: session counts and token consumption by client, a cache hit rate, and by-agent / by-model donut charts](docs/screenshot-2026-11-24.png)
+![Agent usage panel: session counts and token consumption by client, a cache hit rate, and by-agent / by-model donut charts](https://raw.githubusercontent.com/hds1989824/dsh-agent-usage/main/docs/screenshot-2026-11-24.png)
 
 ## What it shows
 
